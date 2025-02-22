@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HaxBall Clone</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a1a1a;
+            overflow: hidden;
+        }
+        
+        canvas {
+            background-color: #4CAF50;  /* Yeşil saha rengi */
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+        }
+
+        #gameContainer {
+            position: relative;
+        }
+
+        #scoreBoard {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+
+        @keyframes goalAnimation {
+            0% {
+                transform: translate(-50%, -50%) scale(0.5);
+                opacity: 0;
+            }
+            50% {
+                transform: translate(-50%, -50%) scale(1.2);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="scoreBoard">
+            Kırmızı 0 - 0 Mavi
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <script>
+        // Canvas boyutlarını ayarla
+        function resizeCanvas() {
+            const canvas = document.getElementById('gameCanvas');
+            const container = document.getElementById('gameContainer');
+            
+            // 16:9 en-boy oranını koru
+            const aspectRatio = 16/9;
+            
+            // Ekran genişliğinin %80'ini kullan
+            let width = window.innerWidth * 0.8;
+            let height = width / aspectRatio;
+            
+            // Eğer yükseklik ekran yüksekliğinin %90'ından fazlaysa, yüksekliğe göre ayarla
+            if (height > window.innerHeight * 0.9) {
+                height = window.innerHeight * 0.9;
+                width = height * aspectRatio;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        // Sayfa yüklendiğinde ve yeniden boyutlandırıldığında canvas'ı ayarla
+        window.addEventListener('load', resizeCanvas);
+        window.addEventListener('resize', resizeCanvas);
+
+        const ws = new WebSocket('ws://localhost:3000');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Oyuncu adını al
+        const playerName = prompt('İsminizi girin:');
+
+        ws.onopen = () => {
+            ws.send(JSON.stringify({
+                type: 'join',
+                name: playerName
+            }));
+        };
+
+        function drawField() {
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            // Saha çizgileri
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            
+            // Orta çizgi
+            ctx.beginPath();
+            ctx.moveTo(width/2, 0);
+            ctx.lineTo(width/2, height);
+            ctx.stroke();
+            
+            // Orta daire
+            ctx.beginPath();
+            ctx.arc(width/2, height/2, height/6, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Kaleler
+            const goalWidth = width/20;
+            const goalHeight = height/3;
+            const goalY = (height - goalHeight)/2;
+            
+            // Sol kale
+            ctx.fillStyle = 'rgba(255,0,0,0.3)';
+            ctx.fillRect(0, goalY, goalWidth, goalHeight);
+            ctx.strokeRect(0, goalY, goalWidth, goalHeight);
+            
+            // Sağ kale
+            ctx.fillStyle = 'rgba(0,0,255,0.3)';
+            ctx.fillRect(width-goalWidth, goalY, goalWidth, goalHeight);
+            ctx.strokeRect(width-goalWidth, goalY, goalWidth, goalHeight);
+            
+            // Köşe yayları
+            const cornerRadius = height/10;
+            ctx.beginPath();
+            // Sol üst köşe
+            ctx.arc(0, 0, cornerRadius, 0, Math.PI/2);
+            // Sağ üst köşe
+            ctx.arc(width, 0, cornerRadius, Math.PI/2, Math.PI);
+            // Sağ alt köşe
+            ctx.arc(width, height, cornerRadius, Math.PI, 3*Math.PI/2);
+            // Sol alt köşe
+            ctx.arc(0, height, cornerRadius, 3*Math.PI/2, 2*Math.PI);
+            ctx.stroke();
+            
+            // Saha boyutlarını ayarla (server ile senkronize)
+            const FIELD_WIDTH = width;
+            const FIELD_HEIGHT = height;
+            
+            // Ölçeklendirme faktörlerini hesapla
+            window.scaleX = FIELD_WIDTH / 800;
+            window.scaleY = FIELD_HEIGHT / 450;
+        }
+
+        // Tuş durumlarını takip etmek için
+        const keys = {
+            ArrowUp: false,
+            ArrowDown: false,
+            ArrowLeft: false,
+            ArrowRight: false
+        };
+
+        // Tuşa basıldığında
+        document.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = true;
+                updateMovement();
+            }
+        });
+
+        // Tuş bırakıldığında
+        document.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = false;
+                updateMovement();
+            }
+        });
+
+        function updateMovement() {
+            let dx = 0, dy = 0;
+            
+            // Yatay hareket
+            if (keys.ArrowLeft) dx -= 1;
+            if (keys.ArrowRight) dx += 1;
+            
+            // Dikey hareket
+            if (keys.ArrowUp) dy -= 1;
+            if (keys.ArrowDown) dy += 1;
+
+            // Hareket varsa sunucuya gönder
+            if (dx !== 0 || dy !== 0) {
+                ws.send(JSON.stringify({
+                    type: 'move',
+                    dx: dx,
+                    dy: dy
+                }));
+            }
+        }
+
+        // Oyun durumunu çiz
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'goal') {
+                // Skor tablosunu güncelle
+                document.getElementById('scoreBoard').textContent = 
+                    `Kırmızı ${data.scores.red} - ${data.scores.blue} Mavi`;
+                
+                // Gol efekti
+                const goalText = document.createElement('div');
+                goalText.textContent = 'GOL!';
+                goalText.style.cssText = `
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    color: ${data.team === 'red' ? '#ff4444' : '#4444ff'};
+                    font-size: 48px;
+                    font-weight: bold;
+                    font-family: Arial, sans-serif;
+                    animation: goalAnimation 2s forwards;
+                `;
+                document.getElementById('gameContainer').appendChild(goalText);
+                
+                // 2 saniye sonra gol yazısını kaldır
+                setTimeout(() => {
+                    goalText.remove();
+                }, 2000);
+                
+                return;
+            }
+
+            const gameState = data;
+            
+            // Canvas'ı temizle
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Sahayı çiz
+            drawField();
+            
+            // Oyuncuları çiz
+            gameState.players.forEach(player => {
+                // Pozisyonları ölçeklendir
+                const screenX = player.x * window.scaleX;
+                const screenY = player.y * window.scaleY;
+                
+                ctx.fillStyle = player.team.name === 'red' ? '#ff4444' : '#4444ff';
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, canvas.height/30, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.stroke();
+                
+                // İsim
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(player.name, screenX, screenY - canvas.height/25);
+            });
+            
+            // Topu çiz
+            const ballX = gameState.ball.x * window.scaleX;
+            const ballY = gameState.ball.y * window.scaleY;
+            
+            // Top gölgesi
+            ctx.beginPath();
+            ctx.arc(ballX, ballY + 2, canvas.height/40, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            ctx.fill();
+            
+            // Top
+            ctx.beginPath();
+            ctx.arc(ballX, ballY, canvas.height/40, 0, Math.PI * 2);
+            ctx.fillStyle = 'white';
+            ctx.fill();
+            ctx.strokeStyle = 'black';
+            ctx.stroke();
+            
+            // Top hızı efekti
+            if (Math.abs(gameState.ball.dx) > 0.1 || Math.abs(gameState.ball.dy) > 0.1) {
+                ctx.beginPath();
+                ctx.moveTo(ballX, ballY);
+                ctx.lineTo(ballX - gameState.ball.dx * 2, ballY - gameState.ball.dy * 2);
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.stroke();
+            }
+        };
+    </script>
+</body>
+</html> 
